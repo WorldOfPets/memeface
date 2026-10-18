@@ -13,12 +13,12 @@
   "channels": 1,
   "mean": 0.5,
   "std": 0.5,
-  "best_val_acc": 0.02396210643633324,
-  "epochs": 6,
+  "best_val_acc": 0.5299526330454165,
+  "epochs": 40,
   "batch_size": 128,
-  "lr": 0.001,
+  "lr": 0.0003,
   "params": 1469095,
-  "train_seconds": 89.6,
-  "device": "cpu",
+  "train_seconds": 1837.1,
+  "device": "cuda",
   "source": "FER2013 (обучение с нуля)"
 }
