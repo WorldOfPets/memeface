@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MemeFace Web</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #ffffff;
+            --accent: #4caf50;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { 
+            background: var(--bg-color); 
+            color: var(--text-color); 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            min-height: 100dvh; /* dvh лучше для мобильных браузеров */
+            margin: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            padding: 10px;
+        }
+        h1 { margin: 10px 0; font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px; }
+        
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        
+        #result { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: cover; 
+            display: block; 
+        }
+
+        .info-panel {
+            width: 100%;
+            max-width: 500px;
+            margin-top: 15px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        .main-emotion {
+            text-align: center;
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin: 0 0 15px 0;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        .prob-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .prob-label { width: 90px; flex-shrink: 0; opacity: 0.8; }
+        .prob-bar-bg {
+            flex-grow: 1;
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0 10px;
+        }
+        .prob-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.2s ease-out;
+            border-radius: 4px;
+        }
+        .prob-value { width: 45px; text-align: right; font-variant-numeric: tabular-nums; }
+
+        .status { 
+            margin-top: 15px; 
+            color: #888; 
+            font-size: 0.85rem; 
+            text-align: center;
+        }
+        .error { color: #ff5252; }
+        
+        /* Скрываем исходное видео и канвас */
+        #video, #canvas { display: none; }
+    </style>
+</head>
+<body>
+    <h1>🎭 MemeFace</h1>
+    
+    <div class="video-wrapper">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <img id="result" alt="Обработанный поток">
+    </div>
+
+    <div class="info-panel">
+        <div class="main-emotion" id="main-emotion">Ожидание...</div>
+        <div id="probabilities"></div>
+    </div>
+
+    <div id="status" class="status">Запрос доступа к камере...</div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const resultImg = document.getElementById('result');
+        const statusDiv = document.getElementById('status');
+        const mainEmotionDiv = document.getElementById('main-emotion');
+        const probsContainer = document.getElementById('probabilities');
+        
+        let isProcessing = false;
+
+        // Словарь для красивого вывода на русском
+        const emotionNames = {
+            angry: "Злость", disgust: "Отвращение", fear: "Страх",
+            happy: "Радость", neutral: "Спокойствие", sad: "Грусть", surprise: "Удивление"
+        };
+
+        // 1. Запрашиваем камеру
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } 
+        }).then(stream => {
+            video.srcObject = stream;
+            video.play();
+            statusDiv.textContent = "Камера активна. Обработка...";
+            requestAnimationFrame(processLoop);
+        }).catch(err => {
+            statusDiv.textContent = "Ошибка: нет доступа к камере. Проверьте разрешения.";
+            statusDiv.className = "status error";
+            console.error(err);
+        });
+
+        // 2. Инициализация полосок вероятностей
+        function initProbBars() {
+            probsContainer.innerHTML = '';
+            for (const key in emotionNames) {
+                const row = document.createElement('div');
+                row.className = 'prob-row';
+                row.innerHTML = `
+                    <span class="prob-label">${emotionNames[key]}</span>
+                    <div class="prob-bar-bg">
+                        <div class="prob-bar-fill" id="bar-${key}"></div>
+                    </div>
+                    <span class="prob-value" id="val-${key}">0%</span>
+                `;
+                probsContainer.appendChild(row);
+            }
+        }
+        initProbBars();
+
+        // 3. Цикл отправки кадров
+        async function processLoop() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && !isProcessing) {
+                isProcessing = true;
+                
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                canvas.toBlob(async (blob) => {
+                    const formData = new FormData();
+                    formData.append('file', blob, 'frame.jpg');
+                    
+                    try {
+                        const response = await fetch('/process_frame', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            
+                            // Обновляем картинку
+                            resultImg.src = data.image;
+                            
+                            // Обновляем текст главной эмоции
+                            mainEmotionDiv.textContent = emotionNames[data.label] || data.label;
+                            
+                            // Обновляем полоски вероятностей
+                            for (const [key, value] of Object.entries(data.probs)) {
+                                const percent = Math.round(value * 100);
+                                const bar = document.getElementById(`bar-${key}`);
+                                const val = document.getElementById(`val-${key}`);
+                                if (bar && val) {
+                                    bar.style.width = `${percent}%`;
+                                    val.textContent = `${percent}%`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Ошибка сети:", e);
+                    } finally {
+                        isProcessing = false;
+                    }
+                }, 'image/jpeg', 0.7); // Качество 0.7 для скорости на мобильных
+            }
+            requestAnimationFrame(processLoop);
+        }
+    </script>
+</body>
+</html>

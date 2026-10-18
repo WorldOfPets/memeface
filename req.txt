@@ -1,0 +1,14 @@
+opencv-python
+numpy
+pillow
+matplotlib
+tqdm
+huggingface_hub
+fastapi
+uvicorn
+torch
+torchvision
+jinja2
+python-multipart
+mediapipe
+onnxruntime
